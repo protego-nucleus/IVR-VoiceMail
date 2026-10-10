@@ -20,7 +20,7 @@ import {
 } from '@/core/voicemail';
 import { getTranscriber } from '@/core/transcribe';
 import { notifyVoicemailTeam } from '@/lib/notify-voicemail';
-import { toStandardMp3 } from '@/lib/audio-convert';
+import { fetchRecording } from '@/lib/recording-fetch';
 
 /** `AGENT_CAMPUS_MAP="9225214602:fsk,9225214603:fwgs"` — which AgentNo maps to which campus
  *  CODE. Reuses VOICEMAIL_LINE_CAMPUS_MAP's env var name for continuity with existing config. */
@@ -46,14 +46,6 @@ function agentTeamMapFromEnv(env: NodeJS.ProcessEnv): Map<string, string> {
   return out;
 }
 
-/** Best-effort guess at the recording's content type from its URL, when the host doesn't say. */
-function contentTypeFromUrl(url: string): string {
-  const ext = url.split('.').pop()?.toLowerCase().split(/[?#]/)[0];
-  if (ext === 'mp3') return 'audio/mpeg';
-  if (ext === 'wav') return 'audio/wav';
-  if (ext === 'ogg') return 'audio/ogg';
-  return 'application/octet-stream';
-}
 
 const RECORDING_KEYS = ['recordingurl', 'recording_url', 'recording', 'recordingfile', 'recordurl', 'callrecording'];
 
@@ -115,36 +107,13 @@ async function handle(req: NextRequest, raw: RawCallWebhookPayload, receivedKeys
   let audioContentType: string | null = null;
   let recordingNote = 'Recording: none sent by the vendor for this call.';
   if (v.recordingUrl) {
-    try {
-      const res = await fetch(v.recordingUrl, { signal: AbortSignal.timeout(15_000) });
-      const type = res.headers.get('content-type') || contentTypeFromUrl(v.recordingUrl);
-      if (!res.ok) {
-        recordingNote = `Recording link ${v.recordingUrl} could not be downloaded (HTTP ${res.status}).`;
-      } else if (/text\/html/i.test(type)) {
-        // A login or error page answered with 200 — storing it as "audio" would give a silent player.
-        recordingNote = `Recording link ${v.recordingUrl} returned a web page, not audio — open it directly.`;
-      } else {
-        const raw = Buffer.from(new Uint8Array(await res.arrayBuffer()));
-        const kb = Math.round(raw.length / 1024);
-        const converted = await toStandardMp3(raw);
-        if (converted.ok) {
-          audioBuffer = converted.audio;
-          audioContentType = 'audio/mpeg';
-          recordingNote = `Recording downloaded from ${v.recordingUrl} — ${kb} KB ${type}, converted to standard MP3.`;
-        } else {
-          audioBuffer = raw;
-          audioContentType = type;
-          recordingNote = `Recording downloaded from ${v.recordingUrl} — ${kb} KB ${type}; conversion failed (${converted.reason}), kept as received.`;
-        }
-      }
-    } catch (err) {
-      audioBuffer = null;
-      // undici's "fetch failed" hides the real reason (refused, timeout, DNS, TLS) in `cause`.
-      const cause = (err as { cause?: { code?: string; message?: string } })?.cause;
-      const why = [err instanceof Error ? err.message : String(err), cause?.code, cause?.message]
-        .filter(Boolean).join(' — ');
-      recordingNote = `Recording link ${v.recordingUrl} could not be downloaded (${why}).`;
-      console.warn(`[voicemail] recording download failed: ${why}`);
+    const r = await fetchRecording(v.recordingUrl);
+    recordingNote = r.note;
+    if (r.ok) {
+      audioBuffer = r.audio;
+      audioContentType = r.contentType;
+    } else {
+      console.warn(`[voicemail] recording download failed: ${r.note}`);
     }
   }
 

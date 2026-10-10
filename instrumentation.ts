@@ -6,5 +6,11 @@ export async function register() {
     const { startMailboxTimer } = await import('./lib/ingest/schedule');
     const r = startMailboxTimer();
     if (!r.started) console.log(`[mailbox tick] not started — ${r.reason}`);
+
+    // Background, never awaited: a slow vendor must not delay the server becoming ready.
+    void import('./lib/backfill-recordings')
+      .then(m => m.backfillRecordings())
+      .then(s => console.log(`[recording backfill] scanned ${s.scanned}, attached ${s.fixed}, still failing ${s.failed}`))
+      .catch(e => console.warn(`[recording backfill] aborted: ${e instanceof Error ? e.message : String(e)}`));
   }
 }
