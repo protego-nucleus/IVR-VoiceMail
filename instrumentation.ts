@@ -7,15 +7,27 @@ export async function register() {
     const r = startMailboxTimer();
     if (!r.started) console.log(`[mailbox tick] not started — ${r.reason}`);
 
-    // Background, never awaited: a slow vendor must not delay the server becoming ready.
-    void import('./lib/backfill-recordings')
-      .then(m => m.backfillRecordings())
-      .then(s => console.log(`[recording backfill] scanned ${s.scanned}, attached ${s.fixed}, still failing ${s.failed}`))
-      .catch(e => console.warn(`[recording backfill] aborted: ${e instanceof Error ? e.message : String(e)}`))
-      // After the recordings, so audio attached just now is transcribed in the same start.
-      .then(() => import('./lib/backfill-transcripts'))
-      .then(m => m.backfillTranscripts())
-      .then(s => console.log(`[transcript backfill] lengths repaired ${s.repaired}, transcribed ${s.done}, failed ${s.failed}${s.skipped ? `, skipped: ${s.skipped}` : ''}`))
-      .catch(e => console.warn(`[transcript backfill] aborted: ${e instanceof Error ? e.message : String(e)}`));
+    // Background, never awaited: a slow vendor must not delay the server becoming ready. Re-run
+    // every 30 minutes so a recording or transcript that failed (rate limit, vendor hiccup) is
+    // picked up without waiting for the next deploy. `running` stops two passes overlapping —
+    // a Groq rate-limit wait can make one pass outlast the interval.
+    let running = false;
+    const pass = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const rec = await (await import('./lib/backfill-recordings')).backfillRecordings();
+        if (rec.scanned) console.log(`[recording backfill] scanned ${rec.scanned}, attached ${rec.fixed}, still failing ${rec.failed}`);
+        // After the recordings, so audio attached just now is transcribed in the same pass.
+        const t = await (await import('./lib/backfill-transcripts')).backfillTranscripts();
+        console.log(`[transcript backfill] lengths repaired ${t.repaired}, transcribed ${t.done}, failed ${t.failed}${t.skipped ? `, skipped: ${t.skipped}` : ''}`);
+      } catch (e) {
+        console.warn(`[backfill] aborted: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        running = false;
+      }
+    };
+    void pass();
+    setInterval(() => void pass(), 30 * 60 * 1000).unref();
   }
 }

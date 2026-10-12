@@ -159,11 +159,30 @@ describe('transcribeWithWhisper — network injected', () => {
   it('reports the HTTP status on an API error', async () => {
     const fetchImpl = (async () => new Response('quota exceeded', { status: 429 })) as unknown as typeof fetch;
     const r = await transcribeWithWhisper({ apiKey: 'k', fetchImpl }, input);
-    expect(r).toEqual({ ok: false, reason: 'OpenAI HTTP 429: quota exceeded' });
+    expect(r).toEqual({ ok: false, reason: 'OpenAI HTTP 429: quota exceeded', retryAfterSeconds: 60 });
   });
 
   it('treats empty text as a failure, not a blank transcript', async () => {
     const fetchImpl = (async () => new Response(JSON.stringify({ text: '  ' }), { status: 200 })) as unknown as typeof fetch;
     expect(await transcribeWithWhisper({ apiKey: 'k', fetchImpl }, input)).toEqual({ ok: false, reason: 'no speech recognised' });
+  });
+});
+
+import { whisperConfigFromEnv } from '../core/transcribe';
+
+describe('Groq', () => {
+  it('reads GROQ_API_KEY and points at Groq with whisper-large-v3', () => {
+    expect(whisperConfigFromEnv({ TRANSCRIBER: 'groq', GROQ_API_KEY: 'g' })).toMatchObject({
+      provider: 'groq', apiKey: 'g', model: 'whisper-large-v3', baseUrl: 'https://api.groq.com/openai/v1',
+    });
+  });
+
+  it('turns a rate limit into a wait time instead of a plain failure', async () => {
+    const fetchImpl = (async () => new Response(
+      '{"error":{"message":"Rate limit reached. Please try again in 7m26.5s."}}', { status: 429 },
+    )) as unknown as typeof fetch;
+    const r = await transcribeWithWhisper({ provider: 'groq', apiKey: 'g', fetchImpl }, { audio: Buffer.from('x'), contentType: 'audio/mpeg', durationSeconds: 5 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.retryAfterSeconds).toBe(447);
   });
 });

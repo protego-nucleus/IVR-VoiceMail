@@ -162,27 +162,47 @@ export function makeGoogleSttTranscriber(cfg: GoogleSttConfig): Transcriber {
 // translation of every other one, and these calls switch mid-sentence.
 // ---------------------------------------------------------------------------------------
 
-const WHISPER_URL = 'https://api.openai.com/v1/audio/transcriptions';
 const WHISPER_PROMPT =
   'Phone call to a school front desk in Surat, India. Speakers mix Gujarati, Hindi and English.';
 
+// Groq (Pradip, 12-Oct-2026): the same open Whisper model behind an OpenAI-compatible API with
+// a free tier — chosen over paying OpenAI. Its free tier is rate-limited per minute and per
+// hour, so a 429 carries how long to wait (retryAfterSeconds) instead of being a plain failure.
 export interface WhisperConfig {
+  /** Shown in failure reasons and on the record's trail. */
+  provider?: 'openai' | 'groq';
   apiKey?: string;
   model?: string;
+  baseUrl?: string;
   fetchImpl?: typeof fetch;
 }
 
-export function whisperConfigFromEnv(env: Record<string, string | undefined> = process.env): WhisperConfig {
-  return { apiKey: env.OPENAI_API_KEY, model: env.OPENAI_TRANSCRIBE_MODEL || 'whisper-1' };
+export function whisperConfigFromEnv(
+  env: Record<string, string | undefined> = process.env,
+  provider: 'openai' | 'groq' = env.TRANSCRIBER === 'groq' ? 'groq' : 'openai',
+): WhisperConfig {
+  return provider === 'groq'
+    ? { provider, apiKey: env.GROQ_API_KEY, model: env.GROQ_TRANSCRIBE_MODEL || 'whisper-large-v3', baseUrl: 'https://api.groq.com/openai/v1' }
+    : { provider, apiKey: env.OPENAI_API_KEY, model: env.OPENAI_TRANSCRIBE_MODEL || 'whisper-1', baseUrl: 'https://api.openai.com/v1' };
 }
 
 export type WhisperResult =
   | { ok: true; text: string; language: string | null; durationSeconds: number | null }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; retryAfterSeconds?: number };
+
+/** "Please try again in 7m26.5s" (Groq) or a Retry-After header → seconds. */
+function retryAfter(res: Response, body: string): number | undefined {
+  const h = Number(res.headers.get('retry-after'));
+  if (Number.isFinite(h) && h > 0) return Math.ceil(h);
+  const m = body.match(/try again in (?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?/i);
+  if (!m || (!m[1] && !m[2] && !m[3])) return undefined;
+  return Math.ceil(Number(m[1] ?? 0) * 3600 + Number(m[2] ?? 0) * 60 + Number(m[3] ?? 0));
+}
 
 /** The detailed call, reporting WHY it failed — the dashboard shows that reason. */
 export async function transcribeWithWhisper(cfg: WhisperConfig, input: TranscribeInput): Promise<WhisperResult> {
-  if (!cfg.apiKey) return { ok: false, reason: 'OPENAI_API_KEY is not set' };
+  const name = cfg.provider === 'groq' ? 'Groq' : 'OpenAI';
+  if (!cfg.apiKey) return { ok: false, reason: `${cfg.provider === 'groq' ? 'GROQ_API_KEY' : 'OPENAI_API_KEY'} is not set` };
   const doFetch = cfg.fetchImpl ?? fetch;
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(input.audio)], { type: input.contentType || 'audio/mpeg' }), 'call.mp3');
@@ -190,15 +210,20 @@ export async function transcribeWithWhisper(cfg: WhisperConfig, input: Transcrib
   form.append('response_format', 'verbose_json');
   form.append('prompt', WHISPER_PROMPT);
   try {
-    const res = await doFetch(WHISPER_URL, {
+    const res = await doFetch(`${cfg.baseUrl ?? 'https://api.openai.com/v1'}/audio/transcriptions`, {
       method: 'POST',
       headers: { authorization: `Bearer ${cfg.apiKey}` },
       body: form,
       signal: AbortSignal.timeout(120_000),
     });
     if (!res.ok) {
-      const detail = (await res.text().catch(() => '')).slice(0, 200);
-      return { ok: false, reason: `OpenAI HTTP ${res.status}${detail ? `: ${detail}` : ''}` };
+      const body = await res.text().catch(() => '');
+      const detail = body.slice(0, 200);
+      return {
+        ok: false,
+        reason: `${name} HTTP ${res.status}${detail ? `: ${detail}` : ''}`,
+        ...(res.status === 429 ? { retryAfterSeconds: retryAfter(res, body) ?? 60 } : {}),
+      };
     }
     const j = (await res.json()) as { text?: string; language?: string; duration?: number };
     const text = (j.text ?? '').trim();
@@ -213,11 +238,12 @@ export async function transcribeWithWhisper(cfg: WhisperConfig, input: Transcrib
 }
 
 export function makeWhisperTranscriber(cfg: WhisperConfig): Transcriber {
+  const provider = cfg.provider ?? 'openai';
   return {
-    name: 'openai',
+    name: provider,
     async transcribe(input) {
       const r = await transcribeWithWhisper(cfg, input);
-      return r.ok ? { text: r.text, confidence: 'high', provider: 'openai' } : null;
+      return r.ok ? { text: r.text, confidence: 'high', provider } : null;
     },
   };
 }
@@ -225,12 +251,12 @@ export function makeWhisperTranscriber(cfg: WhisperConfig): Transcriber {
 export function getTranscriber(name = process.env.TRANSCRIBER ?? 'none'): Transcriber {
   if (name === 'none') return noneTranscriber;
   if (name === 'google') return makeGoogleSttTranscriber(googleSttConfigFromEnv());
-  if (name === 'openai') return makeWhisperTranscriber(whisperConfigFromEnv());
+  if (name === 'openai' || name === 'groq') return makeWhisperTranscriber(whisperConfigFromEnv(process.env, name));
   // Any OTHER provider registers here once it has passed the five-recording test the brief asks
   // for. Failing closed is deliberate: an unrecognised name must never silently send a parent's
   // voicemail to an unapproved or untested transcription service.
   throw new Error(
-    `Unknown transcriber "${name}". Available: "none", "google", "openai" — see docs/IVR-VOICEMAIL-BRIEF.md `
+    `Unknown transcriber "${name}". Available: "none", "google", "openai", "groq" — see docs/IVR-VOICEMAIL-BRIEF.md `
     + 'step 2 for the remaining candidate routes and the test each must pass before it is wired in here.',
   );
 }

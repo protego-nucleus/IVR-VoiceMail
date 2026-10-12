@@ -125,7 +125,7 @@ async function handle(req: NextRequest, raw: RawCallWebhookPayload, receivedKeys
       audio: audioBuffer, contentType: audioContentType ?? 'application/octet-stream',
       durationSeconds: v.durationSeconds,
     };
-    if ((process.env.TRANSCRIBER ?? 'none') === 'openai') {
+    if (['openai', 'groq'].includes(process.env.TRANSCRIBER ?? 'none')) {
       const r = await transcribeWithWhisper(whisperConfigFromEnv(), input);
       if (r.ok) { transcript = r.text; transcriptLang = r.language; } else transcriptError = r.reason;
     } else {

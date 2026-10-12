@@ -33,9 +33,11 @@ async function repairZeroDurations(): Promise<number> {
 export async function backfillTranscripts(): Promise<{ repaired: number; done: number; failed: number; skipped?: string }> {
   const repaired = await repairZeroDurations();
 
-  if ((process.env.TRANSCRIBER ?? 'none') !== 'openai') return { repaired, done: 0, failed: 0, skipped: 'TRANSCRIBER is not "openai"' };
-  const cfg = whisperConfigFromEnv();
-  if (!cfg.apiKey) return { repaired, done: 0, failed: 0, skipped: 'OPENAI_API_KEY is not set' };
+  const provider = process.env.TRANSCRIBER ?? 'none';
+  if (provider !== 'openai' && provider !== 'groq') return { repaired, done: 0, failed: 0, skipped: `TRANSCRIBER is "${provider}"` };
+  const cfg = whisperConfigFromEnv(process.env, provider);
+  if (!cfg.apiKey) return { repaired, done: 0, failed: 0, skipped: `${provider === 'groq' ? 'GROQ' : 'OPENAI'}_API_KEY is not set` };
+  const label = provider === 'groq' ? 'Groq Whisper' : 'OpenAI Whisper';
 
   const pending = await db.voicemailAudio.findMany({
     where: { transcribedAt: null },
@@ -57,9 +59,15 @@ export async function backfillTranscripts(): Promise<{ repaired: number; done: n
       });
       if (!row) continue;
 
-      const r = await transcribeWithWhisper(cfg, {
-        audio: Buffer.from(row.audio), contentType: row.contentType, durationSeconds: row.durationSeconds,
-      });
+      const input = { audio: Buffer.from(row.audio), contentType: row.contentType, durationSeconds: row.durationSeconds };
+      let r = await transcribeWithWhisper(cfg, input);
+      // Rate-limited (Groq's free tier): wait as long as it says, capped at 15 min, then the SAME
+      // recording again — a 429 is "not yet", never a reason to give up on a call.
+      for (let tries = 0; !r.ok && r.retryAfterSeconds && tries < 20; tries++) {
+        const waitMs = Math.min(r.retryAfterSeconds, 900) * 1000 + 1000;
+        await new Promise(res => setTimeout(res, waitMs));
+        r = await transcribeWithWhisper(cfg, input);
+      }
       if (!r.ok) {
         failed++;
         await db.voicemailAudio.update({ where: { id }, data: { transcriptError: r.reason } });
@@ -87,7 +95,7 @@ export async function backfillTranscripts(): Promise<{ repaired: number; done: n
         db.activity.create({
           data: {
             id: randomUUID(), requestId: row.requestId, at: new Date(), kind: 'note',
-            detail: `Transcribed by OpenAI Whisper${r.language ? ` (detected: ${r.language})` : ''}. Suggested "${sug.category}" — ${sug.reason}`,
+            detail: `Transcribed by ${label}${r.language ? ` (detected: ${r.language})` : ''}. Suggested "${sug.category}" — ${sug.reason}`,
           },
         }),
       ]);
@@ -95,6 +103,7 @@ export async function backfillTranscripts(): Promise<{ repaired: number; done: n
     }
   }
 
-  await Promise.all([worker(), worker(), worker()]);
+  // Groq's free tier allows little parallelism; OpenAI's paid tier takes three at once.
+  await Promise.all(provider === 'groq' ? [worker()] : [worker(), worker(), worker()]);
   return { repaired, done, failed };
 }
