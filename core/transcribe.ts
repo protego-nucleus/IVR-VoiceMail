@@ -162,8 +162,11 @@ export function makeGoogleSttTranscriber(cfg: GoogleSttConfig): Transcriber {
 // translation of every other one, and these calls switch mid-sentence.
 // ---------------------------------------------------------------------------------------
 
-const WHISPER_PROMPT =
-  'Phone call to a school front desk in Surat, India. Speakers mix Gujarati, Hindi and English.';
+// NO prompt, deliberately. A context prompt ("Speakers mix Gujarati, Hindi and English") was
+// tried first and, measured on the first 54 real calls (12-Oct-2026), Whisper wrote it INTO 30
+// transcripts wherever the line went quiet, invented a sentence on one, and pushed Hindi calls
+// toward an English translation instead of what was said. Without it, code-mixed speech comes
+// back as spoken ("Good Morning, Madam, एक inquiry करनी थी…").
 
 // Groq (Pradip, 12-Oct-2026): the same open Whisper model behind an OpenAI-compatible API with
 // a free tier — chosen over paying OpenAI. Its free tier is rate-limited per minute and per
@@ -208,7 +211,6 @@ export async function transcribeWithWhisper(cfg: WhisperConfig, input: Transcrib
   form.append('file', new Blob([new Uint8Array(input.audio)], { type: input.contentType || 'audio/mpeg' }), 'call.mp3');
   form.append('model', cfg.model || 'whisper-1');
   form.append('response_format', 'verbose_json');
-  form.append('prompt', WHISPER_PROMPT);
   try {
     const res = await doFetch(`${cfg.baseUrl ?? 'https://api.openai.com/v1'}/audio/transcriptions`, {
       method: 'POST',

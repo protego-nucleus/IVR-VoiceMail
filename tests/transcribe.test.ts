@@ -186,3 +186,12 @@ describe('Groq', () => {
     if (!r.ok) expect(r.retryAfterSeconds).toBe(447);
   });
 });
+
+describe('Whisper request shape', () => {
+  it('sends no prompt — a prompt leaked into real transcripts', async () => {
+    let sent: FormData | null = null;
+    const fetchImpl = (async (_u: string, init: RequestInit) => { sent = init.body as FormData; return new Response('{"text":"hi"}', { status: 200 }); }) as unknown as typeof fetch;
+    await transcribeWithWhisper({ apiKey: 'k', fetchImpl }, { audio: Buffer.from('x'), contentType: 'audio/mpeg', durationSeconds: 1 });
+    expect(sent!.get('prompt')).toBeNull();
+  });
+});
