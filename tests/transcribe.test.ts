@@ -195,3 +195,16 @@ describe('Whisper request shape', () => {
     expect(sent!.get('prompt')).toBeNull();
   });
 });
+
+describe('English for every call', () => {
+  it('defaults to Whisper translate (English), with an opt-out', () => {
+    expect(whisperConfigFromEnv({ TRANSCRIBER: 'groq' }).task).toBe('translate');
+    expect(whisperConfigFromEnv({ TRANSCRIBER: 'groq', TRANSCRIBE_TASK: 'transcribe' }).task).toBe('transcribe');
+  });
+  it('calls the translations endpoint in translate mode', async () => {
+    let url = '';
+    const fetchImpl = (async (u: string) => { url = u; return new Response('{"text":"My daughter is unwell."}', { status: 200 }); }) as unknown as typeof fetch;
+    await transcribeWithWhisper({ apiKey: 'k', task: 'translate', baseUrl: 'https://api.groq.com/openai/v1', fetchImpl }, { audio: Buffer.from('x'), contentType: 'audio/mpeg', durationSeconds: 1 });
+    expect(url).toBe('https://api.groq.com/openai/v1/audio/translations');
+  });
+});

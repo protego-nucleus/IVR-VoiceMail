@@ -83,9 +83,10 @@ export default async function CallRecordings({
           Call recordings <NewBadge />
         </h1>
         <p className="mt-2 text-sm text-muted max-w-[75ch]">
-          Every call the IVR sent with a recording — listen to it, or read what was said. Text is
-          produced automatically and can contain mistakes, especially where Gujarati, Hindi and
-          English are mixed; the recording is always the source of truth.
+          Every call the IVR sent with a recording — listen to it, or read what was said. The text
+          is an automatic English translation of the whole call, whatever language was spoken, so
+          it gives the meaning rather than the exact words and can contain mistakes — the
+          recording is always the source of truth.
         </p>
       </div>
 

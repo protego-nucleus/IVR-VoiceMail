@@ -177,6 +177,10 @@ export interface WhisperConfig {
   apiKey?: string;
   model?: string;
   baseUrl?: string;
+  /** 'translate' = Whisper's built-in translation: every call comes back in English, whatever was
+   *  spoken. Pradip, 12-Oct-2026: "badha calls English ma karo" — Gujarati transcripts were
+   *  unreadable and Hindi came back in Devanagari, while the desk reads and searches in English. */
+  task?: 'transcribe' | 'translate';
   fetchImpl?: typeof fetch;
 }
 
@@ -184,9 +188,10 @@ export function whisperConfigFromEnv(
   env: Record<string, string | undefined> = process.env,
   provider: 'openai' | 'groq' = env.TRANSCRIBER === 'groq' ? 'groq' : 'openai',
 ): WhisperConfig {
+  const task = env.TRANSCRIBE_TASK === 'transcribe' ? 'transcribe' : 'translate';
   return provider === 'groq'
-    ? { provider, apiKey: env.GROQ_API_KEY, model: env.GROQ_TRANSCRIBE_MODEL || 'whisper-large-v3', baseUrl: 'https://api.groq.com/openai/v1' }
-    : { provider, apiKey: env.OPENAI_API_KEY, model: env.OPENAI_TRANSCRIBE_MODEL || 'whisper-1', baseUrl: 'https://api.openai.com/v1' };
+    ? { provider, task, apiKey: env.GROQ_API_KEY, model: env.GROQ_TRANSCRIBE_MODEL || 'whisper-large-v3', baseUrl: 'https://api.groq.com/openai/v1' }
+    : { provider, task, apiKey: env.OPENAI_API_KEY, model: env.OPENAI_TRANSCRIBE_MODEL || 'whisper-1', baseUrl: 'https://api.openai.com/v1' };
 }
 
 export type WhisperResult =
@@ -212,7 +217,7 @@ export async function transcribeWithWhisper(cfg: WhisperConfig, input: Transcrib
   form.append('model', cfg.model || 'whisper-1');
   form.append('response_format', 'verbose_json');
   try {
-    const res = await doFetch(`${cfg.baseUrl ?? 'https://api.openai.com/v1'}/audio/transcriptions`, {
+    const res = await doFetch(`${cfg.baseUrl ?? 'https://api.openai.com/v1'}/audio/${cfg.task === 'translate' ? 'translations' : 'transcriptions'}`, {
       method: 'POST',
       headers: { authorization: `Bearer ${cfg.apiKey}` },
       body: form,
