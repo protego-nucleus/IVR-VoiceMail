@@ -155,14 +155,82 @@ export function makeGoogleSttTranscriber(cfg: GoogleSttConfig): Transcriber {
   };
 }
 
+// ---------------------------------------------------------------------------------------
+// OpenAI Whisper — chosen by Pradip 12-Oct-2026 for the real vendor recordings: they are
+// code-switched Gujarati / Hindi / English phone calls, the case Whisper handles best of the
+// routes the brief listed. The language is deliberately NOT pinned: a pinned language forces
+// translation of every other one, and these calls switch mid-sentence.
+// ---------------------------------------------------------------------------------------
+
+const WHISPER_URL = 'https://api.openai.com/v1/audio/transcriptions';
+const WHISPER_PROMPT =
+  'Phone call to a school front desk in Surat, India. Speakers mix Gujarati, Hindi and English.';
+
+export interface WhisperConfig {
+  apiKey?: string;
+  model?: string;
+  fetchImpl?: typeof fetch;
+}
+
+export function whisperConfigFromEnv(env: Record<string, string | undefined> = process.env): WhisperConfig {
+  return { apiKey: env.OPENAI_API_KEY, model: env.OPENAI_TRANSCRIBE_MODEL || 'whisper-1' };
+}
+
+export type WhisperResult =
+  | { ok: true; text: string; language: string | null; durationSeconds: number | null }
+  | { ok: false; reason: string };
+
+/** The detailed call, reporting WHY it failed — the dashboard shows that reason. */
+export async function transcribeWithWhisper(cfg: WhisperConfig, input: TranscribeInput): Promise<WhisperResult> {
+  if (!cfg.apiKey) return { ok: false, reason: 'OPENAI_API_KEY is not set' };
+  const doFetch = cfg.fetchImpl ?? fetch;
+  const form = new FormData();
+  form.append('file', new Blob([new Uint8Array(input.audio)], { type: input.contentType || 'audio/mpeg' }), 'call.mp3');
+  form.append('model', cfg.model || 'whisper-1');
+  form.append('response_format', 'verbose_json');
+  form.append('prompt', WHISPER_PROMPT);
+  try {
+    const res = await doFetch(WHISPER_URL, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${cfg.apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => '')).slice(0, 200);
+      return { ok: false, reason: `OpenAI HTTP ${res.status}${detail ? `: ${detail}` : ''}` };
+    }
+    const j = (await res.json()) as { text?: string; language?: string; duration?: number };
+    const text = (j.text ?? '').trim();
+    if (!text) return { ok: false, reason: 'no speech recognised' };
+    return {
+      ok: true, text, language: j.language ?? null,
+      durationSeconds: typeof j.duration === 'number' ? Math.round(j.duration) : null,
+    };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export function makeWhisperTranscriber(cfg: WhisperConfig): Transcriber {
+  return {
+    name: 'openai',
+    async transcribe(input) {
+      const r = await transcribeWithWhisper(cfg, input);
+      return r.ok ? { text: r.text, confidence: 'high', provider: 'openai' } : null;
+    },
+  };
+}
+
 export function getTranscriber(name = process.env.TRANSCRIBER ?? 'none'): Transcriber {
   if (name === 'none') return noneTranscriber;
   if (name === 'google') return makeGoogleSttTranscriber(googleSttConfigFromEnv());
+  if (name === 'openai') return makeWhisperTranscriber(whisperConfigFromEnv());
   // Any OTHER provider registers here once it has passed the five-recording test the brief asks
   // for. Failing closed is deliberate: an unrecognised name must never silently send a parent's
   // voicemail to an unapproved or untested transcription service.
   throw new Error(
-    `Unknown transcriber "${name}". Available: "none", "google" — see docs/IVR-VOICEMAIL-BRIEF.md `
+    `Unknown transcriber "${name}". Available: "none", "google", "openai" — see docs/IVR-VOICEMAIL-BRIEF.md `
     + 'step 2 for the remaining candidate routes and the test each must pass before it is wired in here.',
   );
 }

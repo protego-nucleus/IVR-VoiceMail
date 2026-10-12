@@ -11,6 +11,11 @@ export async function register() {
     void import('./lib/backfill-recordings')
       .then(m => m.backfillRecordings())
       .then(s => console.log(`[recording backfill] scanned ${s.scanned}, attached ${s.fixed}, still failing ${s.failed}`))
-      .catch(e => console.warn(`[recording backfill] aborted: ${e instanceof Error ? e.message : String(e)}`));
+      .catch(e => console.warn(`[recording backfill] aborted: ${e instanceof Error ? e.message : String(e)}`))
+      // After the recordings, so audio attached just now is transcribed in the same start.
+      .then(() => import('./lib/backfill-transcripts'))
+      .then(m => m.backfillTranscripts())
+      .then(s => console.log(`[transcript backfill] lengths repaired ${s.repaired}, transcribed ${s.done}, failed ${s.failed}${s.skipped ? `, skipped: ${s.skipped}` : ''}`))
+      .catch(e => console.warn(`[transcript backfill] aborted: ${e instanceof Error ? e.message : String(e)}`));
   }
 }

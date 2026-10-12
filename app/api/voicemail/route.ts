@@ -18,7 +18,7 @@ import {
   buildCallWebhookCapture, callWebhookSourceMessageId, parseCallWebhookPayload, pickField,
   resolveVoicemailCampus, resolveVoicemailTeam, type RawCallWebhookPayload,
 } from '@/core/voicemail';
-import { getTranscriber } from '@/core/transcribe';
+import { getTranscriber, transcribeWithWhisper, whisperConfigFromEnv } from '@/core/transcribe';
 import { notifyVoicemailTeam } from '@/lib/notify-voicemail';
 import { fetchRecording } from '@/lib/recording-fetch';
 
@@ -118,15 +118,22 @@ async function handle(req: NextRequest, raw: RawCallWebhookPayload, receivedKeys
   }
 
   let transcript: string | null = null;
+  let transcriptLang: string | null = null;
+  let transcriptError: string | null = null;
   if (audioBuffer) {
-    try {
-      const result = await getTranscriber().transcribe({
-        audio: audioBuffer, contentType: audioContentType ?? 'application/octet-stream',
-        durationSeconds: v.durationSeconds,
-      });
-      transcript = result?.text ?? null;
-    } catch {
-      transcript = null;
+    const input = {
+      audio: audioBuffer, contentType: audioContentType ?? 'application/octet-stream',
+      durationSeconds: v.durationSeconds,
+    };
+    if ((process.env.TRANSCRIBER ?? 'none') === 'openai') {
+      const r = await transcribeWithWhisper(whisperConfigFromEnv(), input);
+      if (r.ok) { transcript = r.text; transcriptLang = r.language; } else transcriptError = r.reason;
+    } else {
+      try {
+        transcript = (await getTranscriber().transcribe(input))?.text ?? null;
+      } catch {
+        transcript = null;
+      }
     }
   }
 
@@ -182,6 +189,10 @@ async function handle(req: NextRequest, raw: RawCallWebhookPayload, receivedKeys
             sizeBytes: audioBuffer.length,
             durationSeconds: v.durationSeconds,
             audio: audioBuffer,
+            transcript,
+            transcriptLang,
+            transcribedAt: transcript ? new Date() : null,
+            transcriptError,
           },
         },
       } : {}),

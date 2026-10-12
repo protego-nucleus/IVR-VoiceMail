@@ -312,6 +312,14 @@ model VoicemailAudio {
   durationSeconds Int
   audio           Bytes
   receivedAt      DateTime @default(now())
+
+  /// Speech-to-text of the recording (core/transcribe.ts). Null until transcribed — the startup
+  /// backfill (lib/backfill-transcripts.ts) keeps retrying until transcribedAt is set.
+  transcript      String?
+  transcriptLang  String?
+  transcribedAt   DateTime?
+  /// Last failure reason, kept so the dashboard can say WHY a recording has no text yet.
+  transcriptError String?
 }
 
 model RequestMessage {

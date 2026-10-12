@@ -21,6 +21,8 @@ const SECTIONS: { title: string; items: { href: string; icon: keyof typeof ICONS
       // Split out of the Queue in the 26-Aug feedback round (#8): a callback slip is not a
       // request, and 395 of 440 queue items were slips. Its own room, worked as a batch.
       { href: '/switchboard', icon: 'switchboard', label: 'Switchboard', isNew: true },
+      // IVR recordings with their transcripts, one list (12-Oct-2026).
+      { href: '/calls', icon: 'recordings', label: 'Call recordings', isNew: true },
       // Feedback #18/#21: who covers the desk, and who gets what.
       { href: '/roster', icon: 'roster', label: 'Who is on', isNew: true },
     ],
@@ -45,6 +47,12 @@ const SECTIONS: { title: string; items: { href: string; icon: keyof typeof ICONS
 ];
 
 const ICONS: Record<string, ReactNode> = {
+  recordings: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3" />
+    </svg>
+  ),
   roster: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <rect x="3" y="4" width="18" height="18" rx="2" />

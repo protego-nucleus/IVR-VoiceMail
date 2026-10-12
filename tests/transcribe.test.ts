@@ -134,3 +134,36 @@ describe('makeGoogleSttTranscriber — network injected, no real calls in the su
       .transcribe({ audio, contentType: 'audio/wav', durationSeconds: 5 });
   });
 });
+
+import { transcribeWithWhisper } from '../core/transcribe';
+
+describe('transcribeWithWhisper — network injected', () => {
+  const input = { audio: Buffer.from('x'), contentType: 'audio/mpeg', durationSeconds: 10 };
+
+  it('refuses without a key, saying why', async () => {
+    expect(await transcribeWithWhisper({}, input)).toEqual({ ok: false, reason: 'OPENAI_API_KEY is not set' });
+  });
+
+  it('returns text, language and duration, and never pins a language', async () => {
+    let sent: FormData | null = null;
+    const fetchImpl = (async (_u: string, init: RequestInit) => {
+      sent = init.body as FormData;
+      return new Response(JSON.stringify({ text: ' Mari dikri bimar che. ', language: 'gujarati', duration: 41.6 }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const r = await transcribeWithWhisper({ apiKey: 'k', fetchImpl }, input);
+    expect(r).toEqual({ ok: true, text: 'Mari dikri bimar che.', language: 'gujarati', durationSeconds: 42 });
+    expect(sent!.get('language')).toBeNull();
+    expect(sent!.get('response_format')).toBe('verbose_json');
+  });
+
+  it('reports the HTTP status on an API error', async () => {
+    const fetchImpl = (async () => new Response('quota exceeded', { status: 429 })) as unknown as typeof fetch;
+    const r = await transcribeWithWhisper({ apiKey: 'k', fetchImpl }, input);
+    expect(r).toEqual({ ok: false, reason: 'OpenAI HTTP 429: quota exceeded' });
+  });
+
+  it('treats empty text as a failure, not a blank transcript', async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({ text: '  ' }), { status: 200 })) as unknown as typeof fetch;
+    expect(await transcribeWithWhisper({ apiKey: 'k', fetchImpl }, input)).toEqual({ ok: false, reason: 'no speech recognised' });
+  });
+});
