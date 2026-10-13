@@ -40,7 +40,8 @@ export async function backfillTranscripts(): Promise<{ repaired: number; done: n
   const label = provider === 'groq' ? 'Groq Whisper' : 'OpenAI Whisper';
 
   const pending = await db.voicemailAudio.findMany({
-    where: { transcribedAt: null },
+    // Voicemails only — an Answered call's recording is never sent for transcription.
+    where: { transcribedAt: null, callStatus: { in: ['Unanswered', 'Un-opted'] } },
     select: { id: true },
     orderBy: { receivedAt: 'desc' },
   });

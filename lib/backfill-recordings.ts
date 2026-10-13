@@ -17,7 +17,11 @@ const MARK = 'could not be downloaded — open it directly: ';
 
 export async function backfillRecordings(): Promise<{ scanned: number; fixed: number; failed: number }> {
   const pending = await db.request.findMany({
-    where: { channel: 'call', voicemailAudio: { is: null }, body: { contains: MARK } },
+    // Voicemail-only (13-Oct-2026): an Answered call's recording is never fetched.
+    where: {
+      channel: 'call', voicemailAudio: { is: null }, body: { contains: MARK },
+      NOT: { body: { startsWith: 'The call was answered' } },
+    },
     select: { id: true, ref: true, body: true, subject: true },
     orderBy: { arrivedAt: 'desc' },
   });
@@ -38,6 +42,7 @@ export async function backfillRecordings(): Promise<{ scanned: number; fixed: nu
         data: {
           id: randomUUID(), requestId: r.id, dialledNumber: '',
           callerNumber: (r.subject.match(/from (\d+)/) ?? [, ''])[1],
+          callStatus: r.body.startsWith('The call never selected') ? 'Un-opted' : 'Unanswered',
           ivrMenu: null, contentType: res.contentType, sizeBytes: res.audio.length,
           durationSeconds: 0, audio: res.audio,
         },

@@ -21,8 +21,8 @@ const SECTIONS: { title: string; items: { href: string; icon: keyof typeof ICONS
       // Split out of the Queue in the 26-Aug feedback round (#8): a callback slip is not a
       // request, and 395 of 440 queue items were slips. Its own room, worked as a batch.
       { href: '/switchboard', icon: 'switchboard', label: 'Switchboard', isNew: true },
-      // IVR recordings with their transcripts, one list (12-Oct-2026).
-      { href: '/calls', icon: 'recordings', label: 'Call recordings', isNew: true },
+      // IVR voicemails with their English text, one list (12/13-Oct-2026).
+      { href: '/calls', icon: 'recordings', label: 'Voicemails', isNew: true },
       // Feedback #18/#21: who covers the desk, and who gets what.
       { href: '/roster', icon: 'roster', label: 'Who is on', isNew: true },
     ],

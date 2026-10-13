@@ -16,6 +16,10 @@ export const dynamic = 'force-dynamic';
 
 const PAGE = 300;
 
+/** Voicemail-only (Pradip, 13-Oct-2026): a recording of an ANSWERED call is a conversation, not a
+ *  message left, and is never listed here. Rows saved before callStatus existed are all Answered. */
+const VOICEMAIL = ['Unanswered', 'Un-opted'];
+
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
 /** A YYYY-MM-DD from the date picker, read as an IST calendar day. */
@@ -37,6 +41,7 @@ export default async function CallRecordings({
 
   const rows = await db.voicemailAudio.findMany({
     where: {
+      callStatus: { in: VOICEMAIL },
       request: {
         campusOrgUnitId: { in: campusIds },
         NOT: { aboutStaffIds: { has: actor.id } },
@@ -68,7 +73,7 @@ export default async function CallRecordings({
     || can(actor, 'view_safeguarding', { campusOrgUnitId: r.request.campusOrgUnitId, isSafeguarding: true }).allowed,
   );
 
-  const scope = { request: { campusOrgUnitId: { in: campusIds } } };
+  const scope = { callStatus: { in: VOICEMAIL }, request: { campusOrgUnitId: { in: campusIds } } };
   const [total, withText, failed] = await Promise.all([
     db.voicemailAudio.count({ where: scope }),
     db.voicemailAudio.count({ where: { ...scope, transcript: { not: null } } }),
@@ -80,10 +85,10 @@ export default async function CallRecordings({
       <div>
         <Quiet>IVR · way2voice</Quiet>
         <h1 className="font-heading text-2xl font-bold tracking-tight mt-1">
-          Call recordings <NewBadge />
+          Voicemails <NewBadge />
         </h1>
         <p className="mt-2 text-sm text-muted max-w-[75ch]">
-          Every call the IVR sent with a recording — listen to it, or read what was said. The text
+          Messages callers left when nobody answered — listen to one, or read it. The text
           is an automatic English translation of the whole call, whatever language was spoken, so
           it gives the meaning rather than the exact words and can contain mistakes — the
           recording is always the source of truth.
@@ -91,7 +96,7 @@ export default async function CallRecordings({
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat value={total} label="Recordings" />
+        <Stat value={total} label="Voicemails" />
         <Stat value={withText} label="Converted to text" tone="green" />
         <Stat value={total - withText} label="Waiting for text" tone="amber" />
         <Stat value={failed} label="Could not convert" tone={failed ? 'deepred' : 'blue'} />
@@ -148,7 +153,13 @@ export default async function CallRecordings({
             </div>
           </Card>
         ))}
-        {visible.length === 0 && <p className="text-sm text-muted">No recordings match.</p>}
+        {visible.length === 0 && (
+          <p className="text-sm text-muted">
+            {total === 0
+              ? 'No voicemails yet. The IVR has so far sent recordings only for answered calls — voicemail on unanswered calls has to be switched on at the vendor.'
+              : 'No voicemails match.'}
+          </p>
+        )}
       </div>
     </div>
   );

@@ -71,7 +71,11 @@ async function handle(req: NextRequest, raw: RawCallWebhookPayload, receivedKeys
 
   const parsed = parseCallWebhookPayload(raw);
   if (!parsed.ok) return NextResponse.json({ reason: parsed.reason }, { status: 400 });
-  const v = parsed.value;
+  // Voicemail-only (Pradip, 13-Oct-2026): an Answered call's recording is the full conversation
+  // between a parent and the desk, not a message left — it is never downloaded, stored or sent
+  // for transcription. The call itself is still recorded, exactly as a no-recording call is.
+  const answeredRecordingDropped = parsed.value.callStatus === 'Answered' && Boolean(parsed.value.recordingUrl);
+  const v = parsed.value.callStatus === 'Answered' ? { ...parsed.value, recordingUrl: null } : parsed.value;
 
   // Idempotent retry: the same call (caller + instant) resolves to the same reference — the
   // vendor's doc gives us no call id to key on, so the call itself IS the key.
@@ -105,7 +109,9 @@ async function handle(req: NextRequest, raw: RawCallWebhookPayload, receivedKeys
   // still created, marked needs-a-listen, with the URL itself kept on the record's audio row.
   let audioBuffer: Buffer<ArrayBuffer> | null = null;
   let audioContentType: string | null = null;
-  let recordingNote = 'Recording: none sent by the vendor for this call.';
+  let recordingNote = answeredRecordingDropped
+    ? 'Answered call — its recording was not downloaded (voicemail only).'
+    : 'Recording: none sent by the vendor for this call.';
   if (v.recordingUrl) {
     const r = await fetchRecording(v.recordingUrl);
     recordingNote = r.note;
@@ -193,6 +199,7 @@ async function handle(req: NextRequest, raw: RawCallWebhookPayload, receivedKeys
             transcriptLang,
             transcribedAt: transcript ? new Date() : null,
             transcriptError,
+            callStatus: v.callStatus,
           },
         },
       } : {}),

@@ -320,6 +320,10 @@ model VoicemailAudio {
   transcribedAt   DateTime?
   /// Last failure reason, kept so the dashboard can say WHY a recording has no text yet.
   transcriptError String?
+  /// The vendor's CallStatus for this call (Answered / Unanswered / Un-opted). Voicemail-only
+  /// from 13-Oct-2026: only Unanswered / Un-opted recordings are stored, transcribed or listed.
+  /// Null on rows saved before the column existed — all of which were Answered calls.
+  callStatus      String?
 }
 
 model RequestMessage {
